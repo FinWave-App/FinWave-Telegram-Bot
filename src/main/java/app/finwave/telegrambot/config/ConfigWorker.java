@@ -16,7 +16,7 @@ public class ConfigWorker {
     protected final RootConfig main;
 
     public ConfigWorker() throws IOException {
-        main = new RootConfig(new File("config/main.conf"), true);
+        main = new RootConfig(new File("configs/main.conf"), true);
         main.load();
 
         database = main.subNode("database").getOrSetAs(DatabaseConfig.class, DatabaseConfig::new);
