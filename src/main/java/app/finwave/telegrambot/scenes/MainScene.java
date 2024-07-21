@@ -6,6 +6,7 @@ import app.finwave.api.tools.Transaction;
 import app.finwave.api.websocket.FinWaveWebSocketClient;
 import app.finwave.api.websocket.messages.requests.NewNotificationPointRequest;
 import app.finwave.api.websocket.messages.requests.SubscribeNotificationsRequest;
+import app.finwave.tat.BotCore;
 import app.finwave.tat.event.chat.NewMessageEvent;
 import app.finwave.tat.handlers.AbstractChatHandler;
 import app.finwave.tat.menu.BaseMenu;
@@ -24,18 +25,21 @@ import app.finwave.telegrambot.jooq.tables.records.ChatsRecord;
 import app.finwave.telegrambot.utils.*;
 import com.pengrad.telegrambot.model.Message;
 import com.pengrad.telegrambot.model.WebAppInfo;
+import com.pengrad.telegrambot.model.request.ChatAction;
 import com.pengrad.telegrambot.model.request.InlineKeyboardButton;
 import com.pengrad.telegrambot.request.SendChatAction;
+import org.jooq.meta.derby.sys.Sys;
 
 import java.math.BigDecimal;
 import java.net.MalformedURLException;
 import java.net.URISyntaxException;
 import java.net.URL;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
+import java.util.concurrent.*;
+import java.util.concurrent.locks.ReentrantLock;
 
 public class MainScene extends BaseScene<Object> {
     protected BaseMenu menu;
@@ -50,19 +54,25 @@ public class MainScene extends BaseScene<Object> {
     protected ChatsPreferencesRecord preferencesRecord;
 
     protected CommonConfig commonConfig;
+    protected OpenAIConfig aiConfig;
 
-    protected List<Transaction> lastTransactions;
+    protected List<Transaction> lastTransactions = new ArrayList<>();
+    protected long lastFetch = 0;
+
     protected ActionParser parser;
 
     protected OpenAIWorker aiWorker;
 
     protected GPTContext gptContext = new GPTContext(20);
 
-    public MainScene(AbstractChatHandler abstractChatHandler, DatabaseWorker databaseWorker, CommonConfig commonConfig, OpenAIWorker aiWorker) {
+    protected static ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor();
+
+    public MainScene(AbstractChatHandler abstractChatHandler, DatabaseWorker databaseWorker, CommonConfig commonConfig, OpenAIConfig aiConfig, OpenAIWorker aiWorker) {
         super(abstractChatHandler);
 
         this.database = databaseWorker.get(ChatDatabase.class);
         this.commonConfig = commonConfig;
+        this.aiConfig = aiConfig;
         this.preferenceDatabase = databaseWorker.get(ChatPreferenceDatabase.class);
         this.aiWorker = aiWorker;
 
@@ -75,41 +85,87 @@ public class MainScene extends BaseScene<Object> {
 
         ChatsRecord record = database.getChat(this.chatId).orElseThrow();
 
-        this.client = new FinWaveClient(record.getApiUrl(), record.getApiSession(), 5000, 5000);
-        this.state = new ClientState(client);
-        this.preferencesRecord = preferenceDatabase.get(chatId);
-
-        this.menu = new BaseMenu(this);
-
-        this.parser = new ActionParser(state);
-
-        try {
-            if (webSocketClient != null && webSocketClient.isOpen())
-                webSocketClient.close();
-
-            this.webSocketClient = client.connectToWebsocket(new WebSocketHandler(this, preferenceDatabase));
-        } catch (URISyntaxException | InterruptedException e) {
-            e.printStackTrace();
+        if (client == null) {
+            this.client = new FinWaveClient(record.getApiUrl(), record.getApiSession(), 5000, 5000);
+            this.state = new ClientState(client);
+            this.parser = new ActionParser(state);
         }
 
-        Optional<UUID> uuid = Optional.ofNullable(preferencesRecord.getNotificationUuid());
+        this.preferencesRecord = preferenceDatabase.get(chatId);
+        this.menu = new BaseMenu(this);
 
-        if (uuid.isEmpty())
-            webSocketClient.send(new NewNotificationPointRequest("Telegram Bot", false));
-        else
-            webSocketClient.send(new SubscribeNotificationsRequest(uuid.get()));
+        if (webSocketClient == null || !webSocketClient.isOpen()) {
+            try {
+                this.webSocketClient = client.connectToWebsocket(new WebSocketHandler(this, preferenceDatabase));
+            } catch (URISyntaxException | InterruptedException e) {
+                e.printStackTrace();
+            }
+
+            if (webSocketClient.isOpen()) {
+                Optional<UUID> uuid = Optional.ofNullable(preferencesRecord.getNotificationUuid());
+
+                if (uuid.isEmpty())
+                    webSocketClient.send(new NewNotificationPointRequest("Telegram Bot", false));
+                else
+                    webSocketClient.send(new SubscribeNotificationsRequest(uuid.get()));
+            }
+        }
+
+        try {
+            if (!webSocketClient.isOpen() || System.currentTimeMillis() - lastFetch > 30 * 60 * 1000)
+                updateState();
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        } catch (ExecutionException e) {
+            if (e.getCause() instanceof ApiException apiException) {
+                menu.setMessage(MessageBuilder.text("Упс, произошла ошибка: \"" + apiException.message.message() + "\""));
+
+                menu.addButton(new InlineKeyboardButton("Перезапустить бота"), (event) -> {
+                    ((ChatHandler)abstractChatHandler).stopActiveScene();
+                    ((ChatHandler)abstractChatHandler).startScene("init");
+                });
+
+                menu.apply();
+
+                return;
+            }else {
+                throw new RuntimeException(e);
+            }
+        }
 
         update();
     }
 
     protected void gptAnswer() {
-        String answer = aiWorker.answer(gptContext, state, preferencesRecord, 5);
+        BotCore core = abstractChatHandler.getCore();
+        SendChatAction typingStatus = new SendChatAction(chatId, ChatAction.typing);
+
+        ScheduledFuture<?> future = executor.scheduleAtFixedRate(() -> core.execute(typingStatus),
+                0, 2, TimeUnit.SECONDS);
+
+        String answer;
+
+        try {
+            answer = aiWorker.answer(gptContext, state, preferencesRecord, 5);
+        }catch (Exception e) {
+            e.printStackTrace();
+
+            answer = "Произошла ошибка, повторите запрос позже";
+        }finally {
+            future.cancel(true);
+        }
 
         menu.removeAllButtons();
 
         menu.setMessage(MessageBuilder.text(answer));
         menu.addButton(new InlineKeyboardButton(EmojiList.ACCEPT + " Хорошо"), (e) -> {
             gptContext.clear();
+
+            if (!webSocketClient.isOpen()) {
+                try {
+                    updateState();
+                } catch (ExecutionException | InterruptedException ignore) {}
+            }
 
             update();
         });
@@ -127,7 +183,7 @@ public class MainScene extends BaseScene<Object> {
 
         String text = event.data.text();
 
-        if (gptMode == GPTMode.ALWAYS) {
+        if (gptMode == GPTMode.ALWAYS && aiConfig.enabled) {
             gptAnswer();
 
             return;
@@ -135,7 +191,7 @@ public class MainScene extends BaseScene<Object> {
 
         TransactionApi.NewTransactionRequest newRequest = parser.parse(text, preferencesRecord.getPreferredAccountId());
 
-        if (newRequest == null && gptMode == GPTMode.DISABLED) {
+        if (newRequest == null && (gptMode == GPTMode.DISABLED || !aiConfig.enabled)) {
             menu.setMessage(MessageBuilder.text("Не удалось понять запрос. Попробуйте еще раз."));
             menu.addButton(new InlineKeyboardButton(EmojiList.BACK + " Назад"), (e) -> {
                 gptContext.clear();
@@ -157,6 +213,12 @@ public class MainScene extends BaseScene<Object> {
                 client.runRequest(newRequest).whenComplete((r, t) -> {
                     gptContext.clear();
 
+                    if (!webSocketClient.isOpen()) {
+                        try {
+                            updateState();
+                        } catch (ExecutionException | InterruptedException ignore) {}
+                    }
+
                     update();
                 });
             });
@@ -165,9 +227,11 @@ public class MainScene extends BaseScene<Object> {
 
                 update();
             });
-            menu.addButton(new InlineKeyboardButton("Помощь ChatGPT " + EmojiList.BRAIN), (e) -> {
-                gptAnswer();
-            });
+
+            if (aiConfig.enabled)
+                menu.addButton(new InlineKeyboardButton("Помощь ChatGPT " + EmojiList.BRAIN), (e) -> {
+                    gptAnswer();
+                });
 
             menu.apply();
 
@@ -181,38 +245,23 @@ public class MainScene extends BaseScene<Object> {
         });
     }
 
-    public void update() {
+    public synchronized void updateState() throws ExecutionException, InterruptedException {
+        CompletableFuture.allOf(
+                state.update(),
+                state.fetchLastTransactions(10).whenComplete((r, t) -> {
+                    if (t != null)
+                        return;
+
+                    lastTransactions = r;
+                })
+        ).get();
+
+        lastFetch = System.currentTimeMillis();
+    }
+
+    public synchronized void update() {
         menu.removeAllButtons();
         menu.setMaxButtonsInRow(1);
-
-        try {
-            CompletableFuture.allOf(
-                    state.update(),
-                    state.fetchLastTransactions(10).whenComplete((r, t) -> {
-                        if (t != null)
-                            return;
-
-                        lastTransactions = r;
-                    })
-            ).get();
-        } catch (InterruptedException e) {
-            throw new RuntimeException(e);
-        } catch (ExecutionException e) {
-            if (e.getCause() instanceof ApiException apiException) {
-                menu.setMessage(MessageBuilder.text("Упс, произошла ошибка: \"" + apiException.message.message() + "\""));
-
-                menu.addButton(new InlineKeyboardButton("Перезапустить бота"), (event) -> {
-                    ((ChatHandler)abstractChatHandler).stopActiveScene();
-                    ((ChatHandler)abstractChatHandler).startScene("init");
-                });
-
-                menu.apply();
-
-                return;
-            }else {
-                throw new RuntimeException(e);
-            }
-        }
 
         MessageBuilder builder = MessageBuilder.create();
 
@@ -225,6 +274,9 @@ public class MainScene extends BaseScene<Object> {
         if (preferencesRecord.getTipsShowed()) {
             builder.append(buildTipsView().text());
         }
+
+        if (!webSocketClient.isOpen())
+            builder.gap().line(EmojiList.WARNING + " Ошибка подключения к серверу через веб-сокет. Автоматическое обновление и уведомления недоступны");
 
         menu.setMessage(builder.build());
         menu.addButton(new InlineKeyboardButton("Настройки " + EmojiList.SETTINGS), (e) -> {

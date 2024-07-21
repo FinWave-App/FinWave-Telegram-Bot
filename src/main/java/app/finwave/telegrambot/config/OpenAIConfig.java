@@ -1,6 +1,7 @@
 package app.finwave.telegrambot.config;
 
 public class OpenAIConfig {
+    public boolean enabled = false;
     public String token = "XXX";
     public String model = "gpt-4o";
     public String systemMessage = """

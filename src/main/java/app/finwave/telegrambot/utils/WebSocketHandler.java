@@ -10,6 +10,7 @@ import app.finwave.telegrambot.scenes.NotificationScene;
 import org.java_websocket.handshake.ServerHandshake;
 
 import java.util.UUID;
+import java.util.concurrent.ExecutionException;
 
 public class WebSocketHandler extends RoutedWebSocketHandler {
     protected MainScene mainScene;
@@ -23,6 +24,10 @@ public class WebSocketHandler extends RoutedWebSocketHandler {
     @Override
     public void notifyUpdate(String s) {
         ChatHandler chatHandler = (ChatHandler) mainScene.getChatHandler();
+
+        try {
+            mainScene.updateState();
+        } catch (ExecutionException | InterruptedException ignored) {}
 
         if (chatHandler.getActiveScene().equals(mainScene))
             mainScene.update();

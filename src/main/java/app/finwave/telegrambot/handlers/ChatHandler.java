@@ -20,15 +20,15 @@ public class ChatHandler extends ScenedAbstractChatHandler {
     protected ChatDatabase chatDatabase;
     protected NotificationScene notificationScene;
 
-    public ChatHandler(BotCore core, DatabaseWorker databaseWorker, CommonConfig commonConfig, OpenAIWorker aiWorker, long chatId) {
+    public ChatHandler(BotCore core, DatabaseWorker databaseWorker, CommonConfig commonConfig, OpenAIConfig aiConfig, OpenAIWorker aiWorker, long chatId) {
         super(core, chatId);
 
         this.chatDatabase = databaseWorker.get(ChatDatabase.class);
         this.notificationScene = new NotificationScene(this);
 
         registerScene("init", new InitScene(this, databaseWorker, commonConfig));
-        registerScene("main", new MainScene(this, databaseWorker, commonConfig, aiWorker));
-        registerScene("settings", new SettingsScene(this, databaseWorker));
+        registerScene("main", new MainScene(this, databaseWorker, commonConfig, aiConfig, aiWorker));
+        registerScene("settings", new SettingsScene(this, databaseWorker, aiConfig));
         registerScene("notification", notificationScene);
     }
 

@@ -16,16 +16,21 @@ import java.util.concurrent.locks.ReentrantLock;
 public class ClientState {
     protected FinWaveClient client;
 
-    protected List<AccountTagApi.TagEntry> accountTags;
-    protected List<AccountApi.AccountEntry> accounts;
-    protected HashMap<Long, AccountTagApi.TagEntry> accountTagsMap;
-    protected HashMap<Long, AccountApi.AccountEntry> accountsMap;
+    protected List<AccountTagApi.TagEntry> accountTags = new ArrayList<>();
+    protected List<AccountApi.AccountEntry> accounts = new ArrayList<>();
+    protected HashMap<Long, AccountTagApi.TagEntry> accountTagsMap = new HashMap<>();
+    protected HashMap<Long, AccountApi.AccountEntry> accountsMap = new HashMap<>();
 
-    protected List<TransactionTagApi.TagEntry> transactionTags;
-    protected HashMap<Long, TransactionTagApi.TagEntry> transactionTagsMap;
+    protected List<TransactionTagApi.TagEntry> transactionTags  = new ArrayList<>();
+    protected HashMap<Long, TransactionTagApi.TagEntry> transactionTagsMap = new HashMap<>();
 
-    protected List<CurrencyApi.CurrencyEntry> currencies;
-    protected HashMap<Long, CurrencyApi.CurrencyEntry> currenciesMap;
+    protected List<CurrencyApi.CurrencyEntry> currencies = new ArrayList<>();
+    protected HashMap<Long, CurrencyApi.CurrencyEntry> currenciesMap = new HashMap<>();
+
+    protected ReentrantLock accountsLock = new ReentrantLock();
+    protected ReentrantLock accountTagsLock = new ReentrantLock();
+    protected ReentrantLock transactionTagsLock = new ReentrantLock();
+    protected ReentrantLock currenciesLock = new ReentrantLock();
 
     public ClientState(FinWaveClient client) {
         this.client = client;
@@ -48,11 +53,15 @@ public class ClientState {
                         return;
                     }
 
-                    accountTags = r;
-
                     HashMap<Long, AccountTagApi.TagEntry> newMap = new HashMap<>();
                     r.forEach((tag) -> newMap.put(tag.tagId(), tag));
+
+                    accountTagsLock.lock();
+
+                    accountTags = r;
                     accountTagsMap = newMap;
+
+                    accountTagsLock.unlock();
                 });
     }
 
@@ -64,11 +73,15 @@ public class ClientState {
                         return;
                     }
 
-                    accounts = r;
-
                     HashMap<Long, AccountApi.AccountEntry> newMap = new HashMap<>();
                     r.forEach((a) -> newMap.put(a.accountId(), a));
+
+                    accountsLock.lock();
+
+                    accounts = r;
                     accountsMap = newMap;
+
+                    accountsLock.unlock();
                 });
     }
 
@@ -80,11 +93,15 @@ public class ClientState {
                         return;
                     }
 
-                    transactionTags = r;
-
                     HashMap<Long, TransactionTagApi.TagEntry> newMap = new HashMap<>();
                     r.forEach((tag) -> newMap.put(tag.tagId(), tag));
+
+                    transactionTagsLock.lock();
+
+                    transactionTags = r;
                     transactionTagsMap = newMap;
+
+                    transactionTagsLock.unlock();
                 });
     }
 
@@ -96,11 +113,15 @@ public class ClientState {
                         return;
                     }
 
-                    currencies = r;
-
                     HashMap<Long, CurrencyApi.CurrencyEntry> newMap = new HashMap<>();
                     r.forEach((c) -> newMap.put(c.currencyId(), c));
+
+                    currenciesLock.lock();
+
+                    currencies = r;
                     currenciesMap = newMap;
+
+                    currenciesLock.unlock();
                 });
     }
 
@@ -113,8 +134,19 @@ public class ClientState {
         if (hide)
             return "▒▒▒▒";
 
-        AccountApi.AccountEntry account = accountsMap.get(accountId);
-        CurrencyApi.CurrencyEntry currency = currenciesMap.get(account.currencyId());
+        AccountApi.AccountEntry account;
+        CurrencyApi.CurrencyEntry currency;
+
+        accountsLock.lock();
+        currenciesLock.lock();
+
+        try {
+            account = accountsMap.get(accountId);
+            currency = currenciesMap.get(account.currencyId());
+        }finally {
+            accountsLock.unlock();
+            currenciesLock.unlock();
+        }
 
         DecimalFormat df = new DecimalFormat();
         StringBuilder builder = new StringBuilder();
@@ -129,48 +161,103 @@ public class ClientState {
     public HashMap<AccountTagApi.TagEntry, ArrayList<AccountApi.AccountEntry>> getAccountsByTags() {
         HashMap<AccountTagApi.TagEntry, ArrayList<AccountApi.AccountEntry>> accountsByTags = new HashMap<>();
 
-        accounts.forEach((a) -> {
-            AccountTagApi.TagEntry tag = accountTagsMap.get(a.tagId());
+        accountsLock.lock();
+        accountTagsLock.lock();
 
-            if (!accountsByTags.containsKey(tag))
-                accountsByTags.put(tag, new ArrayList<>());
+        try {
+            accounts.forEach((a) -> {
+                AccountTagApi.TagEntry tag = accountTagsMap.get(a.tagId());
 
-            accountsByTags.get(tag).add(a);
-        });
+                if (!accountsByTags.containsKey(tag))
+                    accountsByTags.put(tag, new ArrayList<>());
+
+                accountsByTags.get(tag).add(a);
+            });
+        }finally {
+            accountsLock.unlock();
+            accountTagsLock.unlock();
+        }
 
         return accountsByTags;
     }
 
     public List<AccountTagApi.TagEntry> getAccountTags() {
-        return Collections.unmodifiableList(accountTags);
+        accountTagsLock.lock();
+
+        try {
+            return Collections.unmodifiableList(accountTags);
+        }finally {
+            accountTagsLock.unlock();
+        }
     }
 
     public List<AccountApi.AccountEntry> getAccounts() {
-        return Collections.unmodifiableList(accounts);
+        accountsLock.lock();
+
+        try {
+            return Collections.unmodifiableList(accounts);
+        }finally {
+            accountsLock.unlock();
+        }
     }
 
     public List<TransactionTagApi.TagEntry> getTransactionTags() {
-        return Collections.unmodifiableList(transactionTags);
-    }
+        transactionTagsLock.lock();
 
-    public List<CurrencyApi.CurrencyEntry> getCurrencies() {
-        return Collections.unmodifiableList(currencies);
+        try {
+            return Collections.unmodifiableList(transactionTags);
+        }finally {
+            transactionTagsLock.unlock();
+        }
     }
-
 
     public Map<Long, AccountApi.AccountEntry> getAccountsMap() {
-        return Collections.unmodifiableMap(accountsMap);
+        accountsLock.lock();
+
+        try {
+            return Collections.unmodifiableMap(accountsMap);
+        }finally {
+            accountsLock.unlock();
+        }
     }
 
     public Map<Long, AccountTagApi.TagEntry> getAccountTagsMap() {
-        return Collections.unmodifiableMap(accountTagsMap);
+        accountTagsLock.lock();
+
+        try {
+            return Collections.unmodifiableMap(accountTagsMap);
+        }finally {
+            accountTagsLock.unlock();
+        }
+    }
+
+    public List<CurrencyApi.CurrencyEntry> getCurrencies() {
+        currenciesLock.lock();
+
+        try {
+            return Collections.unmodifiableList(currencies);
+        }finally {
+            currenciesLock.unlock();
+        }
     }
 
     public Map<Long, CurrencyApi.CurrencyEntry> getCurrenciesMap() {
-        return Collections.unmodifiableMap(currenciesMap);
+        currenciesLock.lock();
+
+        try {
+            return Collections.unmodifiableMap(currenciesMap);
+        }finally {
+            currenciesLock.unlock();
+        }
     }
 
     public Map<Long, TransactionTagApi.TagEntry> getTransactionTagsMap() {
-        return Collections.unmodifiableMap(transactionTagsMap);
+        transactionTagsLock.lock();
+
+        try {
+            return Collections.unmodifiableMap(transactionTagsMap);
+        }finally {
+            transactionTagsLock.unlock();
+        }
     }
 }

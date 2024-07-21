@@ -39,7 +39,7 @@ public class Main {
         OpenAIWorker aiWorker = INJ.getInstance(OpenAIWorker.class);
 
         core.setHandlers(new GlobalHandler(core),
-                chatId -> new ChatHandler(core, databaseWorker, configWorker.commonConfig, aiWorker, chatId),
+                chatId -> new ChatHandler(core, databaseWorker, configWorker.commonConfig, configWorker.openAI, aiWorker, chatId),
                 userId -> new UserHandler(core, userId)
         );
 
