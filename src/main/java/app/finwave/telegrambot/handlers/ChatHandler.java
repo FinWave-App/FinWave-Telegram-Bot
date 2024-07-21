@@ -13,12 +13,16 @@ import app.finwave.telegrambot.scenes.MainScene;
 import app.finwave.telegrambot.scenes.NotificationScene;
 import app.finwave.telegrambot.scenes.SettingsScene;
 import app.finwave.telegrambot.utils.OpenAIWorker;
+import com.pengrad.telegrambot.model.User;
+import com.pengrad.telegrambot.request.GetMe;
 
 import java.util.Optional;
+import java.util.concurrent.ExecutionException;
 
 public class ChatHandler extends ScenedAbstractChatHandler {
     protected ChatDatabase chatDatabase;
     protected NotificationScene notificationScene;
+    protected User me;
 
     public ChatHandler(BotCore core, DatabaseWorker databaseWorker, CommonConfig commonConfig, OpenAIConfig aiConfig, OpenAIWorker aiWorker, long chatId) {
         super(core, chatId);
@@ -30,18 +34,38 @@ public class ChatHandler extends ScenedAbstractChatHandler {
         registerScene("main", new MainScene(this, databaseWorker, commonConfig, aiConfig, aiWorker));
         registerScene("settings", new SettingsScene(this, databaseWorker, aiConfig));
         registerScene("notification", notificationScene);
+
+        sentMessages.setLastItemWatcher((m) -> {
+            if (m.second() != null) // ignore database update if last chat id loaded from database
+                chatDatabase.updateLastMessage(chatId, m.first());
+        });
     }
 
     @Override
     public void start() {
         Optional<ChatsRecord> chat = chatDatabase.getChat(chatId);
+        try {
+            me = core.execute(new GetMe()).get().user();
+        } catch (InterruptedException | ExecutionException e) {
+            throw new RuntimeException(e);
+        }
 
         if (chat.isEmpty()) {
             startScene("init");
             return;
         }
 
-        startScene("main", chat.get());
+        ChatsRecord record = chat.get();
+        int lastMessage = record.getLastMessage();
+
+        if (lastMessage != -1)
+            pushLastSentMessageId(lastMessage);
+
+        startScene("main", record);
+    }
+
+    public User getMe() {
+        return me;
     }
 
     public NotificationScene getNotificationScene() {

@@ -86,6 +86,9 @@ public class InitScene extends BaseScene<Object> {
         });
 
         newMessageRemover = eventHandler.registerListener(NewMessageEvent.class, (e) -> {
+            if (e.data.text() == null)
+                return;
+
             abstractChatHandler.deleteMessage(e.data.messageId());
             String rawURL = e.data.text();
 
@@ -155,6 +158,9 @@ public class InitScene extends BaseScene<Object> {
         menu.addButton(new InlineKeyboardButton("Перейти на " + serverHost, "https://" + serverHost));
 
         newMessageRemover = eventHandler.registerListener(NewMessageEvent.class, (e) -> {
+            if (e.data.text() == null)
+                return;
+
             abstractChatHandler.deleteMessage(e.data.messageId());
 
             String session = e.data.text();
@@ -174,7 +180,7 @@ public class InitScene extends BaseScene<Object> {
                 return;
             }
 
-            chatDatabase.registerChat(chatId, serverUrl.toString(), session);
+            chatDatabase.registerChat(chatId, serverUrl.toString(), session, (short) e.data.chat().type().ordinal(), abstractChatHandler.getLastSentMessage().messageId());
             chatPreferences.create(chatId);
 
             ChatHandler handler = (ChatHandler) abstractChatHandler;

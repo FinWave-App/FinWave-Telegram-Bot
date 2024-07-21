@@ -23,6 +23,7 @@ import app.finwave.telegrambot.handlers.ChatHandler;
 import app.finwave.telegrambot.jooq.tables.records.ChatsPreferencesRecord;
 import app.finwave.telegrambot.jooq.tables.records.ChatsRecord;
 import app.finwave.telegrambot.utils.*;
+import com.pengrad.telegrambot.model.Chat;
 import com.pengrad.telegrambot.model.Message;
 import com.pengrad.telegrambot.model.WebAppInfo;
 import com.pengrad.telegrambot.model.request.ChatAction;
@@ -58,12 +59,15 @@ public class MainScene extends BaseScene<Object> {
 
     protected List<Transaction> lastTransactions = new ArrayList<>();
     protected long lastFetch = 0;
+    protected Chat.Type chatType;
 
     protected ActionParser parser;
 
     protected OpenAIWorker aiWorker;
 
     protected GPTContext gptContext = new GPTContext(20);
+
+    protected boolean ignoreUpdates = false;
 
     protected static ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor();
 
@@ -84,6 +88,15 @@ public class MainScene extends BaseScene<Object> {
         super.start();
 
         ChatsRecord record = database.getChat(this.chatId).orElseThrow();
+
+        if (record.getType() == -1) {
+            ((ChatHandler)abstractChatHandler).stopActiveScene();
+            ((ChatHandler)abstractChatHandler).startScene("init");
+
+            return;
+        }
+
+        this.chatType = Chat.Type.values()[record.getType()];
 
         if (client == null) {
             this.client = new FinWaveClient(record.getApiUrl(), record.getApiSession(), 5000, 5000);
@@ -137,6 +150,8 @@ public class MainScene extends BaseScene<Object> {
     }
 
     protected void gptAnswer() {
+        ignoreUpdates = true;
+
         BotCore core = abstractChatHandler.getCore();
         SendChatAction typingStatus = new SendChatAction(chatId, ChatAction.typing);
 
@@ -156,10 +171,12 @@ public class MainScene extends BaseScene<Object> {
         }
 
         menu.removeAllButtons();
+        menu.setMaxButtonsInRow(1);
 
         menu.setMessage(MessageBuilder.text(answer));
         menu.addButton(new InlineKeyboardButton(EmojiList.ACCEPT + " Хорошо"), (e) -> {
             gptContext.clear();
+            ignoreUpdates = false;
 
             if (!webSocketClient.isOpen()) {
                 try {
@@ -174,14 +191,33 @@ public class MainScene extends BaseScene<Object> {
     }
 
     protected void newMessage(NewMessageEvent event) {
+        if (event.data.text() == null)
+            return;
+
+        String text = event.data.text();
+
+        if (chatType != Chat.Type.Private) {
+            String myUsername = ((ChatHandler) getChatHandler()).getMe().username();
+
+            boolean replyToMe = event.data.replyToMessage() != null && event.data.replyToMessage().from().username().equals(myUsername);
+
+            myUsername = "@" + myUsername + " ";
+
+            if (!text.contains(myUsername) && !replyToMe)
+                return;
+
+            text = text.replace(myUsername, "");
+
+            abstractChatHandler.deleteMessage(abstractChatHandler.getLastSentMessageId());
+            menu = new BaseMenu(this, false);
+        }
+
         GPTMode gptMode = GPTMode.of(preferencesRecord.getGptMode());
         gptContext.push(event.data);
 
         abstractChatHandler.deleteMessage(event.data.messageId());
         menu.removeAllButtons();
         menu.setMaxButtonsInRow(1);
-
-        String text = event.data.text();
 
         if (gptMode == GPTMode.ALWAYS && aiConfig.enabled) {
             gptAnswer();
@@ -260,6 +296,9 @@ public class MainScene extends BaseScene<Object> {
     }
 
     public synchronized void update() {
+        if (ignoreUpdates)
+            return;
+
         menu.removeAllButtons();
         menu.setMaxButtonsInRow(1);
 
@@ -278,7 +317,6 @@ public class MainScene extends BaseScene<Object> {
         if (!webSocketClient.isOpen())
             builder.gap().line(EmojiList.WARNING + " Ошибка подключения к серверу через веб-сокет. Автоматическое обновление и уведомления недоступны");
 
-        menu.setMessage(builder.build());
         menu.addButton(new InlineKeyboardButton("Настройки " + EmojiList.SETTINGS), (e) -> {
             ChatHandler handler = (ChatHandler) abstractChatHandler;
 
@@ -290,12 +328,25 @@ public class MainScene extends BaseScene<Object> {
             String webappUrl = new URL(commonConfig.defaultApiUrl).getHost();
             webappUrl = "https://" + webappUrl + "/?autologin=" + client.getToken();
 
-            menu.addButton(new InlineKeyboardButton("Веб-приложение").webApp(new WebAppInfo(webappUrl)));
+            if (chatType == Chat.Type.Private) {
+                menu.addButton(new InlineKeyboardButton("Веб-приложение").webApp(new WebAppInfo(webappUrl)));
+            }else {
+                builder.gap().url(webappUrl, "Веб-приложение");
+            }
+
         } catch (MalformedURLException e) {
             throw new RuntimeException(e);
         }
 
-        menu.apply();
+        menu.setMessage(builder.build());
+
+        try {
+            menu.apply().get();
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        } catch (ExecutionException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     protected ComposedMessage buildNewRequestView(TransactionApi.NewTransactionRequest newRequest) {

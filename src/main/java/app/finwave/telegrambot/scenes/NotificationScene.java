@@ -5,6 +5,7 @@ import app.finwave.tat.handlers.AbstractChatHandler;
 import app.finwave.tat.menu.BaseMenu;
 import app.finwave.tat.scene.BaseScene;
 import app.finwave.tat.utils.MessageBuilder;
+import app.finwave.telegrambot.database.ChatDatabase;
 import app.finwave.telegrambot.handlers.ChatHandler;
 import app.finwave.telegrambot.utils.EmojiList;
 import com.pengrad.telegrambot.model.request.InlineKeyboardButton;

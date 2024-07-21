@@ -13,15 +13,19 @@ public class ChatDatabase extends AbstractDatabase {
         super(context);
     }
 
-    public void registerChat(long chatId, String apiUrl, String session) {
+    public void registerChat(long chatId, String apiUrl, String session, short type, int lastMessage) {
         context.insertInto(CHATS)
                 .set(CHATS.ID, chatId)
                 .set(CHATS.API_URL, apiUrl)
                 .set(CHATS.API_SESSION, session)
+                .set(CHATS.TYPE, type)
+                .set(CHATS.LAST_MESSAGE, lastMessage)
                 .onConflict(CHATS.ID)
                 .doUpdate()
                 .set(CHATS.API_URL, apiUrl)
                 .set(CHATS.API_SESSION, session)
+                .set(CHATS.TYPE, type)
+                .set(CHATS.LAST_MESSAGE, lastMessage)
                 .where(CHATS.ID.eq(chatId))
                 .execute();
     }
@@ -30,5 +34,12 @@ public class ChatDatabase extends AbstractDatabase {
         return context.selectFrom(CHATS)
                 .where(CHATS.ID.eq(chatId))
                 .fetchOptional();
+    }
+
+    public void updateLastMessage(long chatId, int lastMessage) {
+        context.update(CHATS)
+                .set(CHATS.LAST_MESSAGE, lastMessage)
+                .where(CHATS.ID.eq(chatId))
+                .execute();
     }
 }
