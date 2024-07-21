@@ -75,7 +75,7 @@ jobs:
           context: .
           push: true
           tags: |
-            ghcr.io/finwave-telegram-bot/bot:latest
-            ghcr.io/finwave-telegram-bot/bot:${{ steps.get_version.outputs.VERSION }}
+            ghcr.io/finwave-app/telegram-bot:latest
+            ghcr.io/finwave-app/telegram-bot:${{ steps.get_version.outputs.VERSION }}
           labels: |
             org.opencontainers.image.source=${{ github.event.repository.html_url }}
