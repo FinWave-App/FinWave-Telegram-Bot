@@ -29,10 +29,9 @@ public class NotificationScene extends BaseScene<Object> {
 
         if (needNewMessage) {
             try {
-                abstractChatHandler.deleteMessage(abstractChatHandler.getLastSentMessage().messageId()).get();
+                abstractChatHandler.deleteMessage(abstractChatHandler.getLastSentMessageId()).get();
             } catch (InterruptedException | ExecutionException e) {
                 e.printStackTrace();
-                throw new RuntimeException(e);
             }
         }
 
