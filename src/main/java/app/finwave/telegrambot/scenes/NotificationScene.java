@@ -74,7 +74,7 @@ public class NotificationScene extends BaseScene<Object> {
         notifications.add(notification);
 
         ChatHandler handler = (ChatHandler) abstractChatHandler;
-        if (handler.getActiveScene().equals(this))
+        if (this.equals(handler.getActiveScene()))
             update();
     }
 }
