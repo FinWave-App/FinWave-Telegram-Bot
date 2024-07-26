@@ -29,7 +29,7 @@ public class WebSocketHandler extends RoutedWebSocketHandler {
             mainScene.updateState();
         } catch (ExecutionException | InterruptedException ignored) {}
 
-        if (chatHandler.getActiveScene().equals(mainScene))
+        if (mainScene.equals(chatHandler.getActiveScene()))
             mainScene.update();
     }
 
@@ -45,7 +45,7 @@ public class WebSocketHandler extends RoutedWebSocketHandler {
 
         scene.notify(notification);
 
-        if (!chatHandler.getActiveScene().equals(scene)) {
+        if (!scene.equals(chatHandler.getActiveScene())) {
             chatHandler.stopActiveScene();
             chatHandler.startScene("notification");
         }
