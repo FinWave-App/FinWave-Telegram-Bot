@@ -180,7 +180,7 @@ public class InitScene extends BaseScene<Object> {
                 return;
             }
 
-            chatDatabase.registerChat(chatId, serverUrl.toString(), session, (short) e.data.chat().type().ordinal(), abstractChatHandler.getLastSentMessage().messageId());
+            chatDatabase.registerChat(chatId, serverUrl.toString(), session, (short) e.data.chat().type().ordinal(), abstractChatHandler.getLastSentMessageId());
             chatPreferences.create(chatId);
 
             ChatHandler handler = (ChatHandler) abstractChatHandler;
