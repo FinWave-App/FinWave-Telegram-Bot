@@ -22,7 +22,7 @@ repositories {
 
 dependencies {
     implementation 'app.finwave.api:finwave-java-api:1.2.2'
-    implementation 'app.finwave.tat:telegram-abstractions-tools:2.1.2'
+    implementation 'app.finwave.tat:telegram-abstractions-tools:2.1.3'
     implementation 'app.finwave.scw:finwave-scw:0.4.1'
 
     implementation 'com.github.pengrad:java-telegram-bot-api:7.4.0'

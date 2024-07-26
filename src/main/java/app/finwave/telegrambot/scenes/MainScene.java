@@ -344,10 +344,14 @@ public class MainScene extends BaseScene<Object> {
 
         try {
             menu.apply().get();
-        } catch (InterruptedException e) {
-            throw new RuntimeException(e);
-        } catch (ExecutionException e) {
-            throw new RuntimeException(e);
+        } catch (InterruptedException | ExecutionException ignored) {
+            menu.setSentMessage(-1);
+
+            try {
+                menu.apply().get();
+            } catch (InterruptedException | ExecutionException e) {
+                e.printStackTrace();
+            }
         }
     }
 
