@@ -134,6 +134,8 @@ public class MainScene extends BaseScene<Object> {
                 menu.setMessage(MessageBuilder.text("Упс, произошла ошибка: \"" + apiException.message.message() + "\""));
 
                 menu.addButton(new InlineKeyboardButton("Перезапустить бота"), (event) -> {
+                    this.client = null;
+
                     ((ChatHandler)abstractChatHandler).stopActiveScene();
                     ((ChatHandler)abstractChatHandler).startScene("init");
                 });
