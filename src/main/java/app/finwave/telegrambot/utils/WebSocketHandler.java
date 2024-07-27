@@ -10,15 +10,21 @@ import app.finwave.telegrambot.scenes.NotificationScene;
 import org.java_websocket.handshake.ServerHandshake;
 
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 
 public class WebSocketHandler extends RoutedWebSocketHandler {
     protected MainScene mainScene;
     protected ChatPreferenceDatabase preferenceDatabase;
+    protected CompletableFuture<Boolean> authStatus = new CompletableFuture<>();
 
     public WebSocketHandler(MainScene mainScene, ChatPreferenceDatabase preferenceDatabase) {
         this.mainScene = mainScene;
         this.preferenceDatabase = preferenceDatabase;
+    }
+
+    public CompletableFuture<Boolean> getAuthStatus() {
+        return authStatus;
     }
 
     @Override
@@ -65,7 +71,7 @@ public class WebSocketHandler extends RoutedWebSocketHandler {
 
     @Override
     public void authStatus(String s) {
-
+        authStatus.complete(s.equals("Successful"));
     }
 
     @Override

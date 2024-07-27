@@ -50,6 +50,7 @@ public class MainScene extends BaseScene<Object> {
 
     protected FinWaveClient client;
     protected FinWaveWebSocketClient webSocketClient;
+    protected boolean websocketAuthed;
 
     protected ClientState state;
 
@@ -112,14 +113,22 @@ public class MainScene extends BaseScene<Object> {
         this.preferencesRecord = preferenceDatabase.get(chatId);
         this.menu = new BaseMenu(this);
 
-        if (webSocketClient == null || !webSocketClient.isOpen()) {
+        if (webSocketClient == null || !webSocketClient.isOpen() || !websocketAuthed) {
+            WebSocketHandler webSocketHandler = new WebSocketHandler(this, preferenceDatabase);
+
             try {
-                this.webSocketClient = client.connectToWebsocket(new WebSocketHandler(this, preferenceDatabase));
+                this.webSocketClient = client.connectToWebsocket(webSocketHandler);
             } catch (URISyntaxException | InterruptedException e) {
                 e.printStackTrace();
             }
 
-            if (webSocketClient.isOpen()) {
+            try {
+                websocketAuthed = webSocketHandler.getAuthStatus().get(5, TimeUnit.SECONDS);
+            } catch (InterruptedException | ExecutionException | TimeoutException e) {
+                e.printStackTrace();
+            }
+
+            if (webSocketClient.isOpen() && websocketAuthed) {
                 Optional<UUID> uuid = Optional.ofNullable(preferencesRecord.getNotificationUuid());
 
                 if (uuid.isEmpty())
@@ -130,7 +139,7 @@ public class MainScene extends BaseScene<Object> {
         }
 
         try {
-            if (!webSocketClient.isOpen() || System.currentTimeMillis() - lastFetch > 30 * 60 * 1000)
+            if (!webSocketClient.isOpen() || !websocketAuthed || System.currentTimeMillis() - lastFetch > 30 * 60 * 1000)
                 updateState();
         } catch (InterruptedException e) {
             throw new RuntimeException(e);
@@ -185,7 +194,7 @@ public class MainScene extends BaseScene<Object> {
             gptContext.clear();
             ignoreUpdates = false;
 
-            if (!webSocketClient.isOpen()) {
+            if (!webSocketClient.isOpen() || !websocketAuthed) {
                 try {
                     updateState();
                 } catch (ExecutionException | InterruptedException ignore) {}
@@ -256,7 +265,7 @@ public class MainScene extends BaseScene<Object> {
                 client.runRequest(newRequest).whenComplete((r, t) -> {
                     gptContext.clear();
 
-                    if (!webSocketClient.isOpen()) {
+                    if (!webSocketClient.isOpen() || !websocketAuthed) {
                         try {
                             updateState();
                         } catch (ExecutionException | InterruptedException ignore) {}
@@ -329,7 +338,7 @@ public class MainScene extends BaseScene<Object> {
             builder.append(buildTipsView().text());
         }
 
-        if (!webSocketClient.isOpen())
+        if (!webSocketClient.isOpen() || !websocketAuthed)
             builder.gap().line(EmojiList.WARNING + " Ошибка подключения к серверу через веб-сокет. Автоматическое обновление и уведомления недоступны");
 
         menu.addButton(new InlineKeyboardButton("Настройки " + EmojiList.SETTINGS), (e) -> {
