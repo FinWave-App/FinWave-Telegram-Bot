@@ -3,12 +3,10 @@ package app.finwave.telegrambot.utils;
 import app.finwave.api.*;
 import app.finwave.api.tools.Transaction;
 import app.finwave.api.tools.TransactionsFilter;
-import com.google.common.util.concurrent.Futures;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.text.DecimalFormat;
-import java.text.NumberFormat;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.locks.ReentrantLock;
@@ -128,6 +126,11 @@ public class ClientState {
     public CompletableFuture<List<Transaction>> fetchLastTransactions(int count) {
         return client.runRequest(new TransactionApi.GetTransactionsRequest(0, count, TransactionsFilter.EMPTY))
                 .thenApply(TransactionApi.GetTransactionsListResponse::transactions);
+    }
+
+    public CompletableFuture<List<NoteApi.NoteEntry>> fetchImportantNotes() {
+        return client.runRequest(new NoteApi.GetImportantNotesRequest())
+                .thenApply(NoteApi.GetNotesListResponse::notes);
     }
 
     public String formatAmount(BigDecimal amount, long accountId, boolean addPlus, boolean hide) {

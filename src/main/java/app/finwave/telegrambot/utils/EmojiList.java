@@ -16,6 +16,9 @@ public enum EmojiList {
     CLIPBOARD("\uD83D\uDCCB"), // 📋
     TAG("\uD83C\uDFF7\uFE0F"), // 🏷️
     EYES("\uD83D\uDC40"), // 👀
+    SPEECH_BALLOON("\uD83D\uDCAC"), // 💬
+    BOT("\uD83E\uDD16"), // 🤖
+    CREDIT_CARD("\uD83D\uDCB3"),
     CANCEL("\uD83D\uDEAB"); // 🚫
 
     public final String symbol;

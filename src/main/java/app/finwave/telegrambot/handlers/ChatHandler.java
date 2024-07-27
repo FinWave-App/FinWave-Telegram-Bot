@@ -36,7 +36,7 @@ public class ChatHandler extends ScenedAbstractChatHandler {
         registerScene("notification", notificationScene);
 
         sentMessages.setLastItemWatcher((m) -> {
-            if (m.second() != null) // ignore database update if last chat id loaded from database
+            if (m != null && m.second() != null) // ignore database update if last chat id loaded from database
                 chatDatabase.updateLastMessage(chatId, m.first());
         });
     }

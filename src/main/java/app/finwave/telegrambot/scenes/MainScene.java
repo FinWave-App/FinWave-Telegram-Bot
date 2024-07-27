@@ -2,6 +2,7 @@ package app.finwave.telegrambot.scenes;
 
 import app.finwave.api.*;
 import app.finwave.api.tools.ApiException;
+import app.finwave.api.tools.IRequest;
 import app.finwave.api.tools.Transaction;
 import app.finwave.api.websocket.FinWaveWebSocketClient;
 import app.finwave.api.websocket.messages.requests.NewNotificationPointRequest;
@@ -35,10 +36,12 @@ import java.math.BigDecimal;
 import java.net.MalformedURLException;
 import java.net.URISyntaxException;
 import java.net.URL;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Optional;
-import java.util.UUID;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeFormatterBuilder;
+import java.time.format.FormatStyle;
+import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -58,6 +61,8 @@ public class MainScene extends BaseScene<Object> {
     protected OpenAIConfig aiConfig;
 
     protected List<Transaction> lastTransactions = new ArrayList<>();
+    protected List<NoteApi.NoteEntry> notes = new ArrayList<>();
+
     protected long lastFetch = 0;
     protected Chat.Type chatType;
 
@@ -227,7 +232,7 @@ public class MainScene extends BaseScene<Object> {
             return;
         }
 
-        TransactionApi.NewTransactionRequest newRequest = parser.parse(text, preferencesRecord.getPreferredAccountId());
+        IRequest<?> newRequest = parser.parse(text, preferencesRecord.getPreferredAccountId());
 
         if (newRequest == null && (gptMode == GPTMode.DISABLED || !aiConfig.enabled)) {
             menu.setMessage(MessageBuilder.text("Не удалось понять запрос. Попробуйте еще раз."));
@@ -245,8 +250,8 @@ public class MainScene extends BaseScene<Object> {
             return;
         }
 
-        if (!preferencesRecord.getAutoAcceptTransactions()) {
-            menu.setMessage(buildNewRequestView(newRequest));
+        if (!preferencesRecord.getAutoAcceptTransactions() && newRequest instanceof TransactionApi.NewTransactionRequest) {
+            menu.setMessage(buildNewRequestView((TransactionApi.NewTransactionRequest) newRequest));
             menu.addButton(new InlineKeyboardButton("Подтвердить " + EmojiList.ACCEPT), (e) -> {
                 client.runRequest(newRequest).whenComplete((r, t) -> {
                     gptContext.clear();
@@ -291,6 +296,12 @@ public class MainScene extends BaseScene<Object> {
                         return;
 
                     lastTransactions = r;
+                }),
+                state.fetchImportantNotes().whenComplete((r, t) -> {
+                    if (t != null)
+                        return;
+
+                    notes = r;
                 })
         ).get();
 
@@ -308,9 +319,11 @@ public class MainScene extends BaseScene<Object> {
 
         builder.append(buildAccountsView().text());
 
-        builder.line("Последние транзакции:");
-
         builder.append(buildTransactionsView().text()).gap();
+
+        if (!notes.isEmpty()) {
+            builder.append(buildNotesView().text()).gap();
+        }
 
         if (preferencesRecord.getTipsShowed()) {
             builder.append(buildTipsView().text());
@@ -377,24 +390,53 @@ public class MainScene extends BaseScene<Object> {
         }
 
         builder.gap()
-                .line("Для добавления новой транзакции вам необходимо указать сумму (по умолчанию это будет расход, если не поставить знак +), а также название тега и счета.")
-                .line("Если указан предпочитаемый счет, то его можно не указывать. Бот постарается определить нужный тег на основе введенных букв и знака суммы.")
-                .line("Если все данные распознаны верно, остальные слова будут добавлены в описание транзакции.");
+                .line(EmojiList.LIGHT_BULB + " Для добавления новой транзакции вам необходимо указать сумму (по умолчанию это будет расход, если не поставить знак '+'), а также название тега и счета.").gap()
+                .line(EmojiList.ACCOUNT + " Если указан предпочитаемый счет, то его можно не указывать").gap()
+                .line(EmojiList.BOT + " Бот постарается определить нужный тег на основе введенных букв и знака суммы.").gap()
+                .line(EmojiList.BRAIN + " Если все данные распознаны верно, остальные слова будут добавлены в описание транзакции.").gap()
+                .line(EmojiList.SPEECH_BALLOON + " Для добавления заметки введите символ '!' перед текстом.").gap();
+
+        return builder.build();
+    }
+
+    protected ComposedMessage buildNotesView() {
+        MessageBuilder builder = MessageBuilder.create(EmojiList.SPEECH_BALLOON + " Заметки:");
+        DateTimeFormatter formatter = DateTimeFormatter
+                .ofLocalizedDateTime(FormatStyle.SHORT)
+                .withLocale(Locale.forLanguageTag("ru"))
+                .withZone(ZoneId.of("UTC+3"));
+
+        for (NoteApi.NoteEntry note : notes) {
+            builder.gap();
+
+            if (note.notificationTime() != null)
+                builder.bold()
+                        .append(formatter.format(note.notificationTime()))
+                        .bold()
+                        .append(" ");
+
+            builder.line(note.text());
+        }
 
         return builder.build();
     }
 
     protected ComposedMessage buildTransactionsView() {
-        MessageBuilder builder = MessageBuilder.create();
+        MessageBuilder builder = MessageBuilder.create(EmojiList.ACCOUNT + " Последние транзакции:").gap();
 
         var accountsMap = state.getAccountsMap();
         var tagsMap = state.getTransactionTagsMap();
 
-        for (Transaction transaction : lastTransactions) {
+        for (int i = 0; i < lastTransactions.size(); i++) {
+            Transaction transaction = lastTransactions.get(i);
+
             AccountApi.AccountEntry account = accountsMap.get(transaction.accountId());
             TransactionTagApi.TagEntry tag = tagsMap.get(transaction.tagId());
 
             BigDecimal delta = transaction.delta();
+
+            String treeDecorate = i == lastTransactions.size() - 1 ? "└  " : "├  ";
+            builder.append(treeDecorate);
 
             builder.append(state.formatAmount(delta, account.accountId(), true, preferencesRecord.getHideAmounts()))
                     .append(": ")

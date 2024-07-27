@@ -1,8 +1,10 @@
 package app.finwave.telegrambot.utils;
 
 import app.finwave.api.AccountApi;
+import app.finwave.api.NoteApi;
 import app.finwave.api.TransactionApi;
 import app.finwave.api.TransactionTagApi;
+import app.finwave.api.tools.IRequest;
 import org.apache.commons.text.similarity.JaccardSimilarity;
 
 import java.math.BigDecimal;
@@ -20,9 +22,12 @@ public class ActionParser {
         this.state = state;
     }
     
-    public TransactionApi.NewTransactionRequest parse(String clientRequest, long preferredAccountId) {
+    public IRequest<?> parse(String clientRequest, long preferredAccountId) {
         if (clientRequest == null || clientRequest.isBlank())
             return null;
+
+        if (clientRequest.startsWith("!"))
+            return new NoteApi.NewNoteRequest(null, clientRequest.substring(1));
 
         ArrayList<String> words = new ArrayList<>(Arrays.asList(clientRequest.split(" ")));
 
