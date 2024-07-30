@@ -5,4 +5,4 @@ WORKDIR /finwave-bot
 
 COPY ./FinWave-Bot.jar ./
 
-ENTRYPOINT ["java", "-jar", "FinWave-Bot.jar"]
+ENTRYPOINT exec java $JAVA_OPTS -jar FinWave-Bot.jar
