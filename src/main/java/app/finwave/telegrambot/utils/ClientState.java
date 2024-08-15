@@ -9,57 +9,73 @@ import java.math.RoundingMode;
 import java.text.DecimalFormat;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.locks.ReentrantLock;
 
 public class ClientState {
     protected FinWaveClient client;
 
-    protected List<AccountTagApi.TagEntry> accountTags = new ArrayList<>();
+    protected ConfigApi.PublicConfigs configs;
+    protected CompletableFuture<ConfigApi.PublicConfigs> configsFuture;
+
+    protected List<AccountFolderApi.FolderEntry> accountFolders = new ArrayList<>();
     protected List<AccountApi.AccountEntry> accounts = new ArrayList<>();
-    protected HashMap<Long, AccountTagApi.TagEntry> accountTagsMap = new HashMap<>();
+    protected HashMap<Long, AccountFolderApi.FolderEntry> accountFoldersMap = new HashMap<>();
     protected HashMap<Long, AccountApi.AccountEntry> accountsMap = new HashMap<>();
 
-    protected List<TransactionTagApi.TagEntry> transactionTags  = new ArrayList<>();
-    protected HashMap<Long, TransactionTagApi.TagEntry> transactionTagsMap = new HashMap<>();
+    protected List<TransactionCategoryApi.CategoryEntry> transactionCategories = new ArrayList<>();
+    protected HashMap<Long, TransactionCategoryApi.CategoryEntry> transactionCategoriesMap = new HashMap<>();
 
     protected List<CurrencyApi.CurrencyEntry> currencies = new ArrayList<>();
     protected HashMap<Long, CurrencyApi.CurrencyEntry> currenciesMap = new HashMap<>();
 
     protected ReentrantLock accountsLock = new ReentrantLock();
-    protected ReentrantLock accountTagsLock = new ReentrantLock();
-    protected ReentrantLock transactionTagsLock = new ReentrantLock();
+    protected ReentrantLock accountFoldersLock = new ReentrantLock();
+    protected ReentrantLock transactionCategoriesLock = new ReentrantLock();
     protected ReentrantLock currenciesLock = new ReentrantLock();
 
     public ClientState(FinWaveClient client) {
         this.client = client;
+
+        this.configsFuture = client.runRequest(new ConfigApi.GetConfigsRequest());
     }
 
     public CompletableFuture<Void> update() {
         return CompletableFuture.allOf(
                 updateAccounts(),
-                updateAccountTags(),
+                updateAccountFolders(),
                 updateCurrencies(),
-                updateTransactionTags()
+                updateTransactionCategories()
         );
     }
 
-    public CompletableFuture<List<AccountTagApi.TagEntry>> updateAccountTags() {
-        return client.runRequest(new AccountTagApi.GetTagsRequest())
-                .thenApply(AccountTagApi.GetTagsResponse::tags).whenComplete((r, t) -> {
+    public Optional<ConfigApi.PublicConfigs> getConfigs() {
+        if (configs == null && !configsFuture.isCompletedExceptionally()) {
+            try {
+                configs = configsFuture.get();
+            } catch (InterruptedException | ExecutionException ignored) { }
+        }
+
+        return Optional.ofNullable(configs);
+    }
+
+    public CompletableFuture<List<AccountFolderApi.FolderEntry>> updateAccountFolders() {
+        return client.runRequest(new AccountFolderApi.GetFoldersRequest())
+                .thenApply(AccountFolderApi.GetFoldersResponse::folders).whenComplete((r, t) -> {
                     if (t != null) {
                         t.printStackTrace();
                         return;
                     }
 
-                    HashMap<Long, AccountTagApi.TagEntry> newMap = new HashMap<>();
-                    r.forEach((tag) -> newMap.put(tag.tagId(), tag));
+                    HashMap<Long, AccountFolderApi.FolderEntry> newMap = new HashMap<>();
+                    r.forEach((f) -> newMap.put(f.folderId(), f));
 
-                    accountTagsLock.lock();
+                    accountFoldersLock.lock();
 
-                    accountTags = r;
-                    accountTagsMap = newMap;
+                    accountFolders = r;
+                    accountFoldersMap = newMap;
 
-                    accountTagsLock.unlock();
+                    accountFoldersLock.unlock();
                 });
     }
 
@@ -83,23 +99,23 @@ public class ClientState {
                 });
     }
 
-    public CompletableFuture<List<TransactionTagApi.TagEntry>> updateTransactionTags() {
-        return client.runRequest(new TransactionTagApi.GetTagsRequest())
-                .thenApply(TransactionTagApi.GetTagsResponse::tags).whenComplete((r, t) -> {
+    public CompletableFuture<List<TransactionCategoryApi.CategoryEntry>> updateTransactionCategories() {
+        return client.runRequest(new TransactionCategoryApi.GetCategoriesRequest())
+                .thenApply(TransactionCategoryApi.GetCategoriesResponse::categories).whenComplete((r, t) -> {
                     if (t != null) {
                         t.printStackTrace();
                         return;
                     }
 
-                    HashMap<Long, TransactionTagApi.TagEntry> newMap = new HashMap<>();
-                    r.forEach((tag) -> newMap.put(tag.tagId(), tag));
+                    HashMap<Long, TransactionCategoryApi.CategoryEntry> newMap = new HashMap<>();
+                    r.forEach((c) -> newMap.put(c.categoryId(), c));
 
-                    transactionTagsLock.lock();
+                    transactionCategoriesLock.lock();
 
-                    transactionTags = r;
-                    transactionTagsMap = newMap;
+                    transactionCategories = r;
+                    transactionCategoriesMap = newMap;
 
-                    transactionTagsLock.unlock();
+                    transactionCategoriesLock.unlock();
                 });
     }
 
@@ -161,36 +177,36 @@ public class ClientState {
                 .toString();
     }
 
-    public HashMap<AccountTagApi.TagEntry, ArrayList<AccountApi.AccountEntry>> getAccountsByTags() {
-        HashMap<AccountTagApi.TagEntry, ArrayList<AccountApi.AccountEntry>> accountsByTags = new HashMap<>();
+    public HashMap<AccountFolderApi.FolderEntry, ArrayList<AccountApi.AccountEntry>> getAccountsByTags() {
+        HashMap<AccountFolderApi.FolderEntry, ArrayList<AccountApi.AccountEntry>> accountsByFolders = new HashMap<>();
 
         accountsLock.lock();
-        accountTagsLock.lock();
+        accountFoldersLock.lock();
 
         try {
             accounts.forEach((a) -> {
-                AccountTagApi.TagEntry tag = accountTagsMap.get(a.tagId());
+                AccountFolderApi.FolderEntry folder = accountFoldersMap.get(a.folderId());
 
-                if (!accountsByTags.containsKey(tag))
-                    accountsByTags.put(tag, new ArrayList<>());
+                if (!accountsByFolders.containsKey(folder))
+                    accountsByFolders.put(folder, new ArrayList<>());
 
-                accountsByTags.get(tag).add(a);
+                accountsByFolders.get(folder).add(a);
             });
         }finally {
             accountsLock.unlock();
-            accountTagsLock.unlock();
+            accountFoldersLock.unlock();
         }
 
-        return accountsByTags;
+        return accountsByFolders;
     }
 
-    public List<AccountTagApi.TagEntry> getAccountTags() {
-        accountTagsLock.lock();
+    public List<AccountFolderApi.FolderEntry> getAccountFolders() {
+        accountFoldersLock.lock();
 
         try {
-            return Collections.unmodifiableList(accountTags);
+            return Collections.unmodifiableList(accountFolders);
         }finally {
-            accountTagsLock.unlock();
+            accountFoldersLock.unlock();
         }
     }
 
@@ -204,13 +220,13 @@ public class ClientState {
         }
     }
 
-    public List<TransactionTagApi.TagEntry> getTransactionTags() {
-        transactionTagsLock.lock();
+    public List<TransactionCategoryApi.CategoryEntry> getTransactionCategories() {
+        transactionCategoriesLock.lock();
 
         try {
-            return Collections.unmodifiableList(transactionTags);
+            return Collections.unmodifiableList(transactionCategories);
         }finally {
-            transactionTagsLock.unlock();
+            transactionCategoriesLock.unlock();
         }
     }
 
@@ -224,13 +240,13 @@ public class ClientState {
         }
     }
 
-    public Map<Long, AccountTagApi.TagEntry> getAccountTagsMap() {
-        accountTagsLock.lock();
+    public Map<Long, AccountFolderApi.FolderEntry> getAccountFoldersMap() {
+        accountFoldersLock.lock();
 
         try {
-            return Collections.unmodifiableMap(accountTagsMap);
+            return Collections.unmodifiableMap(accountFoldersMap);
         }finally {
-            accountTagsLock.unlock();
+            accountFoldersLock.unlock();
         }
     }
 
@@ -254,13 +270,13 @@ public class ClientState {
         }
     }
 
-    public Map<Long, TransactionTagApi.TagEntry> getTransactionTagsMap() {
-        transactionTagsLock.lock();
+    public Map<Long, TransactionCategoryApi.CategoryEntry> getTransactionCategoriesMap() {
+        transactionCategoriesLock.lock();
 
         try {
-            return Collections.unmodifiableMap(transactionTagsMap);
+            return Collections.unmodifiableMap(transactionCategoriesMap);
         }finally {
-            transactionTagsLock.unlock();
+            transactionCategoriesLock.unlock();
         }
     }
 }

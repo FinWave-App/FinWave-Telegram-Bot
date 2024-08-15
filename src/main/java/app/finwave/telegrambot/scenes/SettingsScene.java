@@ -4,7 +4,6 @@ import app.finwave.tat.handlers.AbstractChatHandler;
 import app.finwave.tat.menu.BaseMenu;
 import app.finwave.tat.scene.BaseScene;
 import app.finwave.tat.utils.MessageBuilder;
-import app.finwave.telegrambot.config.OpenAIConfig;
 import app.finwave.telegrambot.database.ChatPreferenceDatabase;
 import app.finwave.telegrambot.database.DatabaseWorker;
 import app.finwave.telegrambot.handlers.ChatHandler;
@@ -15,19 +14,16 @@ import app.finwave.telegrambot.utils.GPTMode;
 import com.pengrad.telegrambot.model.request.InlineKeyboardButton;
 
 import java.util.ArrayList;
-import java.util.Optional;
 
 public class SettingsScene extends BaseScene<ClientState> {
     protected ChatPreferenceDatabase database;
     protected ClientState state;
     protected BaseMenu menu;
-    protected OpenAIConfig aiConfig;
 
-    public SettingsScene(AbstractChatHandler abstractChatHandler, DatabaseWorker databaseWorker, OpenAIConfig aiConfig) {
+    public SettingsScene(AbstractChatHandler abstractChatHandler, DatabaseWorker databaseWorker) {
         super(abstractChatHandler);
 
         this.database = databaseWorker.get(ChatPreferenceDatabase.class);
-        this.aiConfig = aiConfig;
     }
 
 
@@ -45,6 +41,7 @@ public class SettingsScene extends BaseScene<ClientState> {
         menu.removeAllButtons();
 
         ChatsPreferencesRecord record = database.get(chatId);
+        boolean aiAvailable = state.getConfigs().map(c -> c.ai().enabled()).orElse(false);
 
         MessageBuilder builder = MessageBuilder.create();
 
@@ -57,7 +54,7 @@ public class SettingsScene extends BaseScene<ClientState> {
         }
         builder.gap();
 
-        if (aiConfig.enabled)
+        if (aiAvailable)
             builder.append(EmojiList.BRAIN + " Режим GPT: ").append(GPTMode.of(record.getGptMode()).name.toLowerCase()).gap();
 
         builder.append(EmojiList.LIGHT_BULB + " Подсказки: ").append(record.getTipsShowed() ? "включены" : "отключены").gap();
@@ -65,14 +62,14 @@ public class SettingsScene extends BaseScene<ClientState> {
         builder.append(EmojiList.EYES + " Скрытие сумм: ").append(record.getHideAmounts() ? "да" : "нет");
 
         menu.setMessage(builder.build());
-        if (aiConfig.enabled)
+        if (aiAvailable)
             menu.setButtonsInRows(2, 1, 1, 1, 1);
         else
             menu.setButtonsInRows(2, 1, 1, 1);
 
         menu.addButton(new InlineKeyboardButton("Указать счет " + EmojiList.ACCOUNT), (e) -> selectAccount());
 
-        if (aiConfig.enabled)
+        if (aiAvailable)
             menu.addButton(new InlineKeyboardButton("Изменить режим GPT " + EmojiList.BRAIN), (e) -> editGPTMode());
 
         menu.addButton(new InlineKeyboardButton("Переключить подсказки " + EmojiList.LIGHT_BULB), (e) -> {

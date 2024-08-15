@@ -14,9 +14,7 @@ import app.finwave.tat.menu.BaseMenu;
 import app.finwave.tat.scene.BaseScene;
 import app.finwave.tat.utils.ComposedMessage;
 import app.finwave.tat.utils.MessageBuilder;
-import app.finwave.tat.utils.Stack;
 import app.finwave.telegrambot.config.CommonConfig;
-import app.finwave.telegrambot.config.OpenAIConfig;
 import app.finwave.telegrambot.database.ChatDatabase;
 import app.finwave.telegrambot.database.ChatPreferenceDatabase;
 import app.finwave.telegrambot.database.DatabaseWorker;
@@ -25,25 +23,20 @@ import app.finwave.telegrambot.jooq.tables.records.ChatsPreferencesRecord;
 import app.finwave.telegrambot.jooq.tables.records.ChatsRecord;
 import app.finwave.telegrambot.utils.*;
 import com.pengrad.telegrambot.model.Chat;
-import com.pengrad.telegrambot.model.Message;
 import com.pengrad.telegrambot.model.WebAppInfo;
 import com.pengrad.telegrambot.model.request.ChatAction;
 import com.pengrad.telegrambot.model.request.InlineKeyboardButton;
 import com.pengrad.telegrambot.request.SendChatAction;
-import org.jooq.meta.derby.sys.Sys;
 
 import java.math.BigDecimal;
 import java.net.MalformedURLException;
 import java.net.URISyntaxException;
 import java.net.URL;
 import java.time.ZoneId;
-import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
-import java.time.format.DateTimeFormatterBuilder;
 import java.time.format.FormatStyle;
 import java.util.*;
 import java.util.concurrent.*;
-import java.util.concurrent.locks.ReentrantLock;
 
 public class MainScene extends BaseScene<Object> {
     protected BaseMenu menu;
@@ -59,7 +52,6 @@ public class MainScene extends BaseScene<Object> {
     protected ChatsPreferencesRecord preferencesRecord;
 
     protected CommonConfig commonConfig;
-    protected OpenAIConfig aiConfig;
 
     protected List<Transaction> lastTransactions = new ArrayList<>();
     protected List<NoteApi.NoteEntry> notes = new ArrayList<>();
@@ -69,22 +61,18 @@ public class MainScene extends BaseScene<Object> {
 
     protected ActionParser parser;
 
-    protected OpenAIWorker aiWorker;
-
-    protected GPTContext gptContext = new GPTContext(20);
+    protected AiWorker worker;
 
     protected boolean ignoreUpdates = false;
 
     protected static ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor();
 
-    public MainScene(AbstractChatHandler abstractChatHandler, DatabaseWorker databaseWorker, CommonConfig commonConfig, OpenAIConfig aiConfig, OpenAIWorker aiWorker) {
+    public MainScene(AbstractChatHandler abstractChatHandler, DatabaseWorker databaseWorker, CommonConfig commonConfig) {
         super(abstractChatHandler);
 
         this.database = databaseWorker.get(ChatDatabase.class);
         this.commonConfig = commonConfig;
-        this.aiConfig = aiConfig;
         this.preferenceDatabase = databaseWorker.get(ChatPreferenceDatabase.class);
-        this.aiWorker = aiWorker;
 
         eventHandler.registerListener(NewMessageEvent.class, this::newMessage);
     }
@@ -103,14 +91,23 @@ public class MainScene extends BaseScene<Object> {
         }
 
         this.chatType = Chat.Type.values()[record.getType()];
+        this.preferencesRecord = preferenceDatabase.get(chatId);
+
+        if (worker != null) {
+            worker.setPreferredAccountId(preferencesRecord.getId());
+        }
 
         if (client == null) {
             this.client = new FinWaveClient(record.getApiUrl(), record.getApiSession(), 5000, 5000);
             this.state = new ClientState(client);
             this.parser = new ActionParser(state);
+
+            boolean aiEnabled = state.getConfigs().map((c) -> c.ai().enabled()).orElse(false);
+
+            if (aiEnabled)
+                worker = new AiWorker(client, preferencesRecord.getPreferredAccountId());
         }
 
-        this.preferencesRecord = preferenceDatabase.get(chatId);
         this.menu = new BaseMenu(this);
 
         if (webSocketClient == null || !webSocketClient.isOpen() || !websocketAuthed) {
@@ -149,6 +146,7 @@ public class MainScene extends BaseScene<Object> {
 
                 menu.addButton(new InlineKeyboardButton("Перезапустить бота"), (event) -> {
                     this.client = null;
+                    this.worker = null;
 
                     ((ChatHandler)abstractChatHandler).stopActiveScene();
                     ((ChatHandler)abstractChatHandler).startScene("init");
@@ -165,7 +163,7 @@ public class MainScene extends BaseScene<Object> {
         update();
     }
 
-    protected void gptAnswer() {
+    protected void gptAnswer(String message) {
         ignoreUpdates = true;
 
         BotCore core = abstractChatHandler.getCore();
@@ -177,7 +175,7 @@ public class MainScene extends BaseScene<Object> {
         String answer;
 
         try {
-            answer = aiWorker.answer(gptContext, state, preferencesRecord, 5);
+            answer = worker.ask(message).get();
         }catch (Exception e) {
             e.printStackTrace();
 
@@ -191,7 +189,7 @@ public class MainScene extends BaseScene<Object> {
 
         menu.setMessage(MessageBuilder.text(answer));
         menu.addButton(new InlineKeyboardButton(EmojiList.ACCEPT + " Хорошо"), (e) -> {
-            gptContext.clear();
+            worker.initContext();
             ignoreUpdates = false;
 
             if (!webSocketClient.isOpen() || !websocketAuthed) {
@@ -228,25 +226,27 @@ public class MainScene extends BaseScene<Object> {
             menu = new BaseMenu(this, false);
         }
 
+        String finalText = text;
+
         GPTMode gptMode = GPTMode.of(preferencesRecord.getGptMode());
-        gptContext.push(event.data);
 
         abstractChatHandler.deleteMessage(event.data.messageId());
         menu.removeAllButtons();
         menu.setMaxButtonsInRow(1);
 
-        if (gptMode == GPTMode.ALWAYS && aiConfig.enabled) {
-            gptAnswer();
+        if (gptMode == GPTMode.ALWAYS && worker != null) {
+            gptAnswer(finalText);
 
             return;
         }
 
         IRequest<?> newRequest = parser.parse(text, preferencesRecord.getPreferredAccountId());
 
-        if (newRequest == null && (gptMode == GPTMode.DISABLED || !aiConfig.enabled)) {
+        if (newRequest == null && (gptMode == GPTMode.DISABLED || worker == null)) {
             menu.setMessage(MessageBuilder.text("Не удалось понять запрос. Попробуйте еще раз."));
             menu.addButton(new InlineKeyboardButton(EmojiList.BACK + " Назад"), (e) -> {
-                gptContext.clear();
+                if (worker != null)
+                    worker.initContext();
 
                 update();
             });
@@ -254,7 +254,7 @@ public class MainScene extends BaseScene<Object> {
             menu.apply();
             return;
         }else if (newRequest == null) {
-            gptAnswer();
+            gptAnswer(finalText);
 
             return;
         }
@@ -263,7 +263,8 @@ public class MainScene extends BaseScene<Object> {
             menu.setMessage(buildNewRequestView((TransactionApi.NewTransactionRequest) newRequest));
             menu.addButton(new InlineKeyboardButton("Подтвердить " + EmojiList.ACCEPT), (e) -> {
                 client.runRequest(newRequest).whenComplete((r, t) -> {
-                    gptContext.clear();
+                    if (worker != null)
+                        worker.initContext();
 
                     if (!webSocketClient.isOpen() || !websocketAuthed) {
                         try {
@@ -275,14 +276,15 @@ public class MainScene extends BaseScene<Object> {
                 });
             });
             menu.addButton(new InlineKeyboardButton("Отмена " + EmojiList.CANCEL), (e) -> {
-                gptContext.clear();
+                if (worker != null)
+                    worker.initContext();
 
                 update();
             });
 
-            if (aiConfig.enabled)
+            if (worker != null)
                 menu.addButton(new InlineKeyboardButton("Помощь ChatGPT " + EmojiList.BRAIN), (e) -> {
-                    gptAnswer();
+                    gptAnswer(finalText);
                 });
 
             menu.apply();
@@ -291,7 +293,8 @@ public class MainScene extends BaseScene<Object> {
         }
 
         client.runRequest(newRequest).whenComplete((r, t) -> {
-            gptContext.clear();
+            if (worker != null)
+                worker.initContext();
 
             update();
         });
@@ -381,7 +384,7 @@ public class MainScene extends BaseScene<Object> {
         MessageBuilder builder = MessageBuilder.create("Подтвердите новую транзакцию: ").gap();
 
         builder.line(EmojiList.ACCOUNT + " Счет: " + state.getAccountsMap().get(newRequest.accountId()).name());
-        builder.line(EmojiList.TAG + " Тег: " + state.getTransactionTagsMap().get(newRequest.tagId()).name());
+        builder.line(EmojiList.TAG + " Тег: " + state.getTransactionCategoriesMap().get(newRequest.categoryId()).name());
         builder.line(EmojiList.WARNING + " Сумма: " + state.formatAmount(newRequest.delta(), newRequest.accountId(), true, preferencesRecord.getHideAmounts()));
 
         if (newRequest.description() != null)
@@ -434,13 +437,13 @@ public class MainScene extends BaseScene<Object> {
         MessageBuilder builder = MessageBuilder.create(EmojiList.ACCOUNT + " Последние транзакции:").gap();
 
         var accountsMap = state.getAccountsMap();
-        var tagsMap = state.getTransactionTagsMap();
+        var tagsMap = state.getTransactionCategoriesMap();
 
         for (int i = 0; i < lastTransactions.size(); i++) {
             Transaction transaction = lastTransactions.get(i);
 
             AccountApi.AccountEntry account = accountsMap.get(transaction.accountId());
-            TransactionTagApi.TagEntry tag = tagsMap.get(transaction.tagId());
+            TransactionCategoryApi.CategoryEntry category = tagsMap.get(transaction.categoryId());
 
             BigDecimal delta = transaction.delta();
 
@@ -451,7 +454,7 @@ public class MainScene extends BaseScene<Object> {
                     .append(": ")
                     .append(account.name())
                     .append(", ")
-                    .append(tag.name());
+                    .append(category.name());
 
             if (transaction.description() != null) {
                 builder.append(", " + transaction.description());

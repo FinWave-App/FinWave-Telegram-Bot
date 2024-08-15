@@ -3,7 +3,7 @@ package app.finwave.telegrambot.utils;
 import app.finwave.api.AccountApi;
 import app.finwave.api.NoteApi;
 import app.finwave.api.TransactionApi;
-import app.finwave.api.TransactionTagApi;
+import app.finwave.api.TransactionCategoryApi;
 import app.finwave.api.tools.IRequest;
 import org.apache.commons.text.similarity.JaccardSimilarity;
 
@@ -62,21 +62,21 @@ public class ActionParser {
                 Math.min(words.size(), deltaIndex + 3)
         ));
 
-        String tagWord = null;
+        String categoryWord = null;
         String accountWord = null;
 
-        double maxTagSimilarity = -1;
+        double maxCategorySimilarity = -1;
         double maxAccountSimilarity = -1;
 
-        double tagSim = -1;
+        double categorySim = -1;
         double accountSim = -1;
 
         int deltaSig = delta.signum();
 
-        List<TransactionTagApi.TagEntry> tags = state.getTransactionTags().stream().filter((t) -> t.type() * deltaSig >= 0).toList();
+        List<TransactionCategoryApi.CategoryEntry> categories = state.getTransactionCategories().stream().filter((t) -> t.type() * deltaSig >= 0).toList();
         List<AccountApi.AccountEntry> accounts = state.getAccounts();
 
-        TransactionTagApi.TagEntry targetTag = null;
+        TransactionCategoryApi.CategoryEntry targetCategory = null;
         AccountApi.AccountEntry targetAccount = null;
 
         for (String word : closetWords) {
@@ -111,31 +111,31 @@ public class ActionParser {
             closetWords.remove(accountWord);
 
         for (String word : closetWords) {
-            for (var tag : tags) {
-                tagSim = similarity.apply(word.toLowerCase(), tag.name().toLowerCase());
+            for (var category : categories) {
+                categorySim = similarity.apply(word.toLowerCase(), category.name().toLowerCase());
 
-                boolean startWith = tag.name().toLowerCase().startsWith(word.toLowerCase());
+                boolean startWith = category.name().toLowerCase().startsWith(word.toLowerCase());
 
                 if (startWith)
-                    tagSim *= 1.2;
+                    categorySim *= 1.2;
 
-                if ((startWith || tagSim >= 0.5) && tagSim > maxTagSimilarity) {
-                    maxTagSimilarity = tagSim;
-                    targetTag = tag;
-                    tagWord = word;
+                if ((startWith || categorySim >= 0.5) && categorySim > maxCategorySimilarity) {
+                    maxCategorySimilarity = categorySim;
+                    targetCategory = category;
+                    categoryWord = word;
                 }
 
-                if (tagSim >= 1)
+                if (categorySim >= 1)
                     break;
             }
 
-            if (tagSim >= 1) break;
+            if (categorySim >= 1) break;
         }
 
-        if (targetTag == null)
+        if (targetCategory == null)
             return null;
 
-        words.remove(tagWord);
+        words.remove(categoryWord);
         words.remove(accountWord);
 
         String description = null;
@@ -148,6 +148,6 @@ public class ActionParser {
 
         OffsetDateTime time = OffsetDateTime.now();
 
-        return new TransactionApi.NewTransactionRequest(targetTag.tagId(), targetAccount.accountId(), time, delta, description);
+        return new TransactionApi.NewTransactionRequest(targetCategory.categoryId(), targetAccount.accountId(), time, delta, description);
     }
 }

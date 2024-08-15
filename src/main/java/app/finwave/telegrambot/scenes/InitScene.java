@@ -153,9 +153,16 @@ public class InitScene extends BaseScene<Object> {
         }
 
         String serverHost = serverUrl.getHost();
+        String serverUrlString = serverUrl.toString();
+        String userLink = serverUrlString.contains("/api") ? serverHost : serverUrlString;
 
         menu.setMessage(builder.build());
-        menu.addButton(new InlineKeyboardButton("Перейти на " + serverHost, "https://" + serverHost));
+
+        if (serverHost.contains("."))
+            menu.addButton(new InlineKeyboardButton("Перейти на " + serverHost, userLink));
+
+        if (newMessageRemover != null)
+            newMessageRemover.remove();
 
         newMessageRemover = eventHandler.registerListener(NewMessageEvent.class, (e) -> {
             if (e.data.text() == null)
@@ -175,7 +182,11 @@ public class InitScene extends BaseScene<Object> {
 
             if (response == null || response.username() == null || response.username().isBlank()) {
                 menu.setMessage(MessageBuilder.text("Кажется, токен невалидный. Попробуйте еще раз"));
-                menu.apply();
+                menu.apply().whenComplete((r, t) -> {
+                    if (t != null) {
+                        t.printStackTrace();
+                    }
+                });
 
                 return;
             }

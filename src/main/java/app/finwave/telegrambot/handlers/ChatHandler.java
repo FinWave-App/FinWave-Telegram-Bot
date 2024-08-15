@@ -4,7 +4,6 @@ import app.finwave.tat.BotCore;
 import app.finwave.tat.handlers.scened.ScenedAbstractChatHandler;
 import app.finwave.tat.scene.BaseScene;
 import app.finwave.telegrambot.config.CommonConfig;
-import app.finwave.telegrambot.config.OpenAIConfig;
 import app.finwave.telegrambot.database.ChatDatabase;
 import app.finwave.telegrambot.database.DatabaseWorker;
 import app.finwave.telegrambot.jooq.tables.records.ChatsRecord;
@@ -12,7 +11,6 @@ import app.finwave.telegrambot.scenes.InitScene;
 import app.finwave.telegrambot.scenes.MainScene;
 import app.finwave.telegrambot.scenes.NotificationScene;
 import app.finwave.telegrambot.scenes.SettingsScene;
-import app.finwave.telegrambot.utils.OpenAIWorker;
 import com.pengrad.telegrambot.model.User;
 import com.pengrad.telegrambot.request.GetMe;
 
@@ -24,15 +22,15 @@ public class ChatHandler extends ScenedAbstractChatHandler {
     protected NotificationScene notificationScene;
     protected User me;
 
-    public ChatHandler(BotCore core, DatabaseWorker databaseWorker, CommonConfig commonConfig, OpenAIConfig aiConfig, OpenAIWorker aiWorker, long chatId) {
+    public ChatHandler(BotCore core, DatabaseWorker databaseWorker, CommonConfig commonConfig, long chatId) {
         super(core, chatId);
 
         this.chatDatabase = databaseWorker.get(ChatDatabase.class);
         this.notificationScene = new NotificationScene(this);
 
         registerScene("init", new InitScene(this, databaseWorker, commonConfig));
-        registerScene("main", new MainScene(this, databaseWorker, commonConfig, aiConfig, aiWorker));
-        registerScene("settings", new SettingsScene(this, databaseWorker, aiConfig));
+        registerScene("main", new MainScene(this, databaseWorker, commonConfig));
+        registerScene("settings", new SettingsScene(this, databaseWorker));
         registerScene("notification", notificationScene);
 
         sentMessages.setLastItemWatcher((m) -> {
