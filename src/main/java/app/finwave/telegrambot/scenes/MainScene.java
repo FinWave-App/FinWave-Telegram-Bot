@@ -14,6 +14,7 @@ import app.finwave.tat.menu.BaseMenu;
 import app.finwave.tat.scene.BaseScene;
 import app.finwave.tat.utils.ComposedMessage;
 import app.finwave.tat.utils.MessageBuilder;
+import app.finwave.telegrambot.Main;
 import app.finwave.telegrambot.config.CommonConfig;
 import app.finwave.telegrambot.database.ChatDatabase;
 import app.finwave.telegrambot.database.ChatPreferenceDatabase;
@@ -23,10 +24,14 @@ import app.finwave.telegrambot.jooq.tables.records.ChatsPreferencesRecord;
 import app.finwave.telegrambot.jooq.tables.records.ChatsRecord;
 import app.finwave.telegrambot.utils.*;
 import com.pengrad.telegrambot.model.Chat;
+import com.pengrad.telegrambot.model.Document;
+import com.pengrad.telegrambot.model.PhotoSize;
 import com.pengrad.telegrambot.model.WebAppInfo;
 import com.pengrad.telegrambot.model.request.ChatAction;
 import com.pengrad.telegrambot.model.request.InlineKeyboardButton;
+import com.pengrad.telegrambot.request.GetFile;
 import com.pengrad.telegrambot.request.SendChatAction;
+import com.pengrad.telegrambot.response.GetFileResponse;
 
 import java.math.BigDecimal;
 import java.net.MalformedURLException;
@@ -163,6 +168,19 @@ public class MainScene extends BaseScene<Object> {
         update();
     }
 
+    protected CompletableFuture<Boolean> appendTelegramFile(String fileId, String mime, String name) {
+        return this.getChatHandler().getCore().execute(new GetFile(fileId))
+                .thenApply((r) -> r.file().filePath())
+                .thenApply((r) -> "https://api.telegram.org/file/bot" + Main.getBotToken() + "/" + r)
+                .thenApply((r) -> {
+                    try {
+                        return worker.appendFile(r, mime, name).get();
+                    } catch (InterruptedException | ExecutionException e) {
+                        throw new RuntimeException(e);
+                    }
+                });
+    }
+
     protected void gptAnswer(String message) {
         ignoreUpdates = true;
 
@@ -205,34 +223,86 @@ public class MainScene extends BaseScene<Object> {
     }
 
     protected void newMessage(NewMessageEvent event) {
-        if (event.data.text() == null)
-            return;
-
-        String text = event.data.text();
+        Optional<String> optionalText = Optional.ofNullable(event.data.text());
 
         if (chatType != Chat.Type.Private) {
             String myUsername = ((ChatHandler) getChatHandler()).getMe().username();
 
             boolean replyToMe = event.data.replyToMessage() != null && event.data.replyToMessage().from().username().equals(myUsername);
 
-            myUsername = "@" + myUsername + " ";
+            String myUsernameWithPing = "@" + myUsername + " ";
 
-            if (!text.contains(myUsername) && !replyToMe)
+            if ((optionalText.isEmpty() || !optionalText.get().contains(myUsernameWithPing)) && !replyToMe)
                 return;
 
-            text = text.replace(myUsername, "");
+            optionalText = optionalText.map(
+                    (text) -> text.replace(myUsernameWithPing, "")
+            );
 
             abstractChatHandler.deleteMessage(abstractChatHandler.getLastSentMessageId());
             menu = new BaseMenu(this, false);
         }
 
-        String finalText = text;
-
-        GPTMode gptMode = GPTMode.of(preferencesRecord.getGptMode());
-
         abstractChatHandler.deleteMessage(event.data.messageId());
         menu.removeAllButtons();
         menu.setMaxButtonsInRow(1);
+
+        if (optionalText.isEmpty() && worker != null) {
+            String caption = event.data.caption();
+            CompletableFuture<Boolean> future = null;
+
+            Document document = event.data.document();
+            PhotoSize[] photoSizes = event.data.photo();
+
+            if (photoSizes != null && photoSizes.length > 0) {
+                future = appendTelegramFile(photoSizes[photoSizes.length - 1].fileId(), "image/jpeg", "Telegram Photo");
+            }else if (document != null) {
+                future = appendTelegramFile(document.fileId(), document.mimeType(), document.fileName());
+            }
+
+            if (future == null)
+                return;
+
+            try {
+                future.get();
+            } catch (InterruptedException | ExecutionException e) {
+                e.printStackTrace();
+
+                menu.setMessage(MessageBuilder.text("Ошибка: недопустимый формат или серверный сбой"));
+                menu.apply();
+
+                return;
+            }
+
+            if (caption != null && !caption.isBlank()) {
+                gptAnswer(caption);
+
+                return;
+            }
+
+            menu.setMessage(MessageBuilder.text("Файл прикреплен к контексту " + EmojiList.ACCEPT));
+
+            menu.addButton(new InlineKeyboardButton(EmojiList.CANCEL + " Отменить"), (e) -> {
+                worker.initContext();
+                ignoreUpdates = false;
+
+                if (!webSocketClient.isOpen() || !websocketAuthed) {
+                    try {
+                        updateState();
+                    } catch (ExecutionException | InterruptedException ignore) {}
+                }
+
+                update();
+            });
+
+            menu.apply();
+
+            return;
+        }
+
+        String finalText = optionalText.get();
+
+        GPTMode gptMode = GPTMode.of(preferencesRecord.getGptMode());
 
         if (gptMode == GPTMode.ALWAYS && worker != null) {
             gptAnswer(finalText);
@@ -240,7 +310,7 @@ public class MainScene extends BaseScene<Object> {
             return;
         }
 
-        IRequest<?> newRequest = parser.parse(text, preferencesRecord.getPreferredAccountId());
+        IRequest<?> newRequest = parser.parse(finalText, preferencesRecord.getPreferredAccountId());
 
         if (newRequest == null && (gptMode == GPTMode.DISABLED || worker == null)) {
             menu.setMessage(MessageBuilder.text("Не удалось понять запрос. Попробуйте еще раз."));

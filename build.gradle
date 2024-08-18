@@ -6,7 +6,7 @@ plugins {
 }
 
 group = 'app.finwave.telegrambot'
-version = '1.5.0'
+version = '1.6.0'
 mainClassName = group + ".Main"
 archivesBaseName = 'FinWave-Bot'
 
@@ -21,7 +21,7 @@ repositories {
 }
 
 dependencies {
-    implementation 'app.finwave.api:finwave-java-api:1.4.1'
+    implementation 'app.finwave.api:finwave-java-api:1.5.0'
     implementation 'app.finwave.tat:telegram-abstractions-tools:2.1.3'
     implementation 'app.finwave.scw:finwave-scw:0.4.1'
 
@@ -54,7 +54,7 @@ dependencies {
 
 
 flyway {
-    url = 'jdbc:postgresql://localhost:5432/finwavebot'
+    url = 'jdbc:postgresql://localhost:5433/finwavebot'
     user = 'finwavebot'
     password = 'change_me'
     schemas = ['public']
@@ -71,7 +71,7 @@ jooq {
             generationTool {
                 jdbc {
                     driver = 'org.postgresql.Driver'
-                    url = 'jdbc:postgresql://localhost:5432/finwavebot'
+                    url = 'jdbc:postgresql://localhost:5433/finwavebot'
                     user = 'finwavebot'
                     password = 'change_me'
                     properties {

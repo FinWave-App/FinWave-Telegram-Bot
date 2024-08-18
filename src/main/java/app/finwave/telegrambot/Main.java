@@ -18,9 +18,13 @@ public class Main {
     protected static Injector INJ;
     protected static Logger log;
 
+    protected static String botToken;
+
     public static void main(String[] args) throws IOException {
         ConfigWorker configWorker = new ConfigWorker();
-        BotCore core = new BotCore(configWorker.telegram.apiToken);
+        botToken = configWorker.telegram.apiToken;
+
+        BotCore core = new BotCore(botToken);
 
         INJ = Guice.createInjector(binder -> {
             binder.bind(BotCore.class).toInstance(core);
@@ -38,6 +42,10 @@ public class Main {
         );
 
         log.info("Bot started");
+    }
+
+    public static String getBotToken() {
+        return botToken;
     }
 
     public static Injector getINJ() {

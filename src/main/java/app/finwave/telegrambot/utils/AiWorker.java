@@ -1,6 +1,7 @@
 package app.finwave.telegrambot.utils;
 
 import app.finwave.api.AiApi;
+import app.finwave.api.FilesApi;
 import app.finwave.api.FinWaveClient;
 
 import java.util.Optional;
@@ -42,5 +43,23 @@ public class AiWorker {
 
         return client.runRequest(new AiApi.AskRequest(context, message), 2 * 60 * 1000, 2 * 60 * 1000)
                 .thenApply(AiApi.AnswerResponse::answer);
+    }
+
+    public CompletableFuture<Boolean> appendFile(String telegramUrl, String mime, String name) {
+        long context = getCurrentContextId().orElseThrow();
+
+        return client.runRequest(
+                new FilesApi.UploadFromURLRequest(1, true, mime, name, null, telegramUrl)
+        ).thenApply((response -> {
+            try {
+                return client.runRequest(new AiApi.AttachFileRequest(context, response.fileId())).get();
+            } catch (InterruptedException | ExecutionException e) {
+                e.printStackTrace();
+
+                return null;
+            }
+        })).thenApply(
+                (r) -> r != null && r.message().equals("Attached successfully")
+        );
     }
 }
