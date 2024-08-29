@@ -1,10 +1,8 @@
 package app.finwave.telegrambot.utils;
 
-import app.finwave.api.AccountApi;
-import app.finwave.api.NoteApi;
-import app.finwave.api.TransactionApi;
-import app.finwave.api.TransactionCategoryApi;
+import app.finwave.api.*;
 import app.finwave.api.tools.IRequest;
+import app.finwave.tat.utils.Pair;
 import org.apache.commons.text.similarity.JaccardSimilarity;
 
 import java.math.BigDecimal;
@@ -12,6 +10,8 @@ import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 public class ActionParser {
     protected ClientState state;
@@ -21,7 +21,68 @@ public class ActionParser {
     public ActionParser(ClientState state) {
         this.state = state;
     }
-    
+
+    protected Pair<AccountApi.AccountEntry, Integer> findAccount(List<String> words, int deltaIndex, long preferredAccountId) {
+        AccountApi.AccountEntry targetAccount = null;
+
+        List<AccountApi.AccountEntry> accounts = state.getAccounts();
+        Map<Long, AccountFolderApi.FolderEntry> folderMap = state.getAccountFoldersMap();
+
+        double maxAccountSimilarity = -1;
+        double accountSim;
+        int accountAdditionalWords = 0;
+
+        for (var account : accounts) {
+            AccountFolderApi.FolderEntry folder = folderMap.get(account.folderId());
+            int additionalWords = folder.name().trim().split(" ").length +
+                    account.name().trim().split(" ").length + 1;
+
+            String closetWords = String.join(" ", words.subList(
+                    Math.max(0, deltaIndex - additionalWords),
+                    Math.min(words.size(), deltaIndex + additionalWords + 1)
+            )).toLowerCase();
+
+            accountSim = similarity.apply(closetWords, (folder.name() + " " + account.name()).toLowerCase());
+
+            if (account.accountId() == preferredAccountId)
+                accountSim *= 1.2;
+
+            if (accountSim > maxAccountSimilarity) {
+                maxAccountSimilarity = accountSim;
+                targetAccount = account;
+                accountAdditionalWords = additionalWords;
+            }
+        }
+
+        return Pair.of(targetAccount, accountAdditionalWords);
+    }
+
+    protected TransactionCategoryApi.CategoryEntry findCategory(ArrayList<String> words, int deltaIndex, int deltaSig, int accountAdditionalWords) {
+        TransactionCategoryApi.CategoryEntry targetCategory = null;
+
+        List<TransactionCategoryApi.CategoryEntry> categories = state.getTransactionCategories().stream().filter((t) -> t.type() * deltaSig >= 0).toList();
+        double maxCategorySimilarity = -1;
+        double categorySim;
+
+        for (var category : categories) {
+            int additionalWords = accountAdditionalWords + category.name().trim().split(" ").length;
+
+            String closetWords = String.join(" ", words.subList(
+                    Math.max(0, deltaIndex - additionalWords),
+                    Math.min(words.size(), deltaIndex + additionalWords + 1)
+            )).toLowerCase();
+
+            categorySim = similarity.apply(closetWords, category.name().toLowerCase());
+
+            if (categorySim > maxCategorySimilarity) {
+                maxCategorySimilarity = categorySim;
+                targetCategory = category;
+            }
+        }
+
+        return targetCategory;
+    }
+
     public IRequest<?> parse(String clientRequest, long preferredAccountId) {
         if (clientRequest == null || clientRequest.isBlank())
             return null;
@@ -54,100 +115,34 @@ public class ActionParser {
             deltaIndex++;
         }
 
-        if (delta == null)
+        if (delta == null || words.isEmpty())
             return null;
 
-        ArrayList<String> closetWords = new ArrayList<>(words.subList(
-                Math.max(0, deltaIndex - 2),
-                Math.min(words.size(), deltaIndex + 3)
-        ));
+        AccountApi.AccountEntry targetAccount;
+        int additionalWords = 0;
 
-        String categoryWord = null;
-        String accountWord = null;
-
-        double maxCategorySimilarity = -1;
-        double maxAccountSimilarity = -1;
-
-        double categorySim = -1;
-        double accountSim = -1;
-
-        int deltaSig = delta.signum();
-
-        List<TransactionCategoryApi.CategoryEntry> categories = state.getTransactionCategories().stream().filter((t) -> t.type() * deltaSig >= 0).toList();
-        List<AccountApi.AccountEntry> accounts = state.getAccounts();
-
-        TransactionCategoryApi.CategoryEntry targetCategory = null;
-        AccountApi.AccountEntry targetAccount = null;
-
-        for (String word : closetWords) {
-            for (var account : accounts) {
-                accountSim = similarity.apply(word.toLowerCase(), account.name().toLowerCase());
-
-                boolean startWith = account.name().toLowerCase().startsWith(word.toLowerCase());
-
-                if (startWith)
-                    accountSim *= 1.2;
-
-                if ((startWith || accountSim >= 0.5) && accountSim > maxAccountSimilarity) {
-                    maxAccountSimilarity = accountSim;
-                    targetAccount = account;
-                    accountWord = word;
-                }
-
-                if (accountSim >= 1)
-                    break;
-            }
-
-            if (accountSim >= 1) break;
-        }
-
-        if (targetAccount == null || (preferredAccountId != -1 && accountSim < 0.95))
+        if (words.size() == 1) {
             targetAccount = state.getAccountsMap().get(preferredAccountId);
+        }else {
+            Pair<AccountApi.AccountEntry, Integer> found = findAccount(words, deltaIndex, preferredAccountId);
+            targetAccount = found.first();
+            additionalWords = found.second();
+        }
 
         if (targetAccount == null)
             return null;
 
-        if (accountWord != null)
-            closetWords.remove(accountWord);
-
-        for (String word : closetWords) {
-            for (var category : categories) {
-                categorySim = similarity.apply(word.toLowerCase(), category.name().toLowerCase());
-
-                boolean startWith = category.name().toLowerCase().startsWith(word.toLowerCase());
-
-                if (startWith)
-                    categorySim *= 1.2;
-
-                if ((startWith || categorySim >= 0.5) && categorySim > maxCategorySimilarity) {
-                    maxCategorySimilarity = categorySim;
-                    targetCategory = category;
-                    categoryWord = word;
-                }
-
-                if (categorySim >= 1)
-                    break;
-            }
-
-            if (categorySim >= 1) break;
-        }
+        TransactionCategoryApi.CategoryEntry targetCategory = findCategory(words, deltaIndex, delta.signum(), additionalWords);
 
         if (targetCategory == null)
             return null;
 
-        words.remove(categoryWord);
-        words.remove(accountWord);
-
-        String description = null;
-
-        if (!words.isEmpty()) {
-            StringBuilder builder = new StringBuilder();
-            words.forEach((w) -> builder.append(w).append(" "));
-            description = builder.toString().trim();
-        }
-
-        OffsetDateTime time = OffsetDateTime.now();
-
-        return new TransactionApi.NewTransactionRequest(targetCategory.categoryId(), targetAccount.accountId(), time, delta, description);
+        return new TransactionApi.NewTransactionRequest(
+                targetCategory.categoryId(),
+                targetAccount.accountId(),
+                OffsetDateTime.now(),
+                delta,
+                String.join(" ", words) + " (TG)"
+        );
     }
 }

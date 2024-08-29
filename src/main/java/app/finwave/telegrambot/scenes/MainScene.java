@@ -453,7 +453,10 @@ public class MainScene extends BaseScene<Object> {
     protected ComposedMessage buildNewRequestView(TransactionApi.NewTransactionRequest newRequest) {
         MessageBuilder builder = MessageBuilder.create("Подтвердите новую транзакцию: ").gap();
 
-        builder.line(EmojiList.ACCOUNT + " Счет: " + state.getAccountsMap().get(newRequest.accountId()).name());
+        AccountApi.AccountEntry account = state.getAccountsMap().get(newRequest.accountId());
+        AccountFolderApi.FolderEntry folder = state.getAccountFoldersMap().get(account.folderId());
+
+        builder.line(EmojiList.ACCOUNT + " Счет: " + account.name() + " (" + folder.name() + ")");
         builder.line(EmojiList.TAG + " Тег: " + state.getTransactionCategoriesMap().get(newRequest.categoryId()).name());
         builder.line(EmojiList.WARNING + " Сумма: " + state.formatAmount(newRequest.delta(), newRequest.accountId(), true, preferencesRecord.getHideAmounts()));
 

@@ -6,7 +6,7 @@ plugins {
 }
 
 group = 'app.finwave.telegrambot'
-version = '1.6.0'
+version = '1.7.0'
 mainClassName = group + ".Main"
 archivesBaseName = 'FinWave-Bot'
 
